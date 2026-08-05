@@ -471,8 +471,6 @@ export class XiangqiScene {
     const pos = new THREE.Vector3().setFromSpherical(this.spherical).add(this.cameraTarget);
     this.camera.position.copy(pos);
     this.camera.lookAt(this.cameraTarget);
-    // DEBUG
-    (window as unknown as { __cam?: unknown }).__cam = { pos: pos.toArray(), target: this.cameraTarget.toArray() };
   }
 
   // --------------------------------------------------------------- events
@@ -896,7 +894,9 @@ export class XiangqiScene {
     if (opts.mode) this.mode = opts.mode;
     if (opts.humanSide) {
       this.humanSide = opts.humanSide;
-      this.spherical.theta = opts.humanSide === "r" ? 0 : Math.PI;
+      // Red sits at the near edge (small z); place the camera behind the
+      // human player so their own army is at the bottom of the screen.
+      this.spherical.theta = opts.humanSide === "r" ? Math.PI : 0;
       this.updateCamera();
     }
     if (opts.difficulty) this.difficulty = opts.difficulty;
