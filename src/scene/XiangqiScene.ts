@@ -11,16 +11,17 @@ import type { Board, Difficulty, Move, Piece, Side } from "../game/types";
 import { chooseMove } from "../game/ai";
 import { sound } from "../audio/SoundEngine";
 import {
-  buildPieceMesh,
-  PIECE_H,
-  reskinPieceMesh,
-  type PieceMesh,
-} from "./pieces";
+  animateFigure,
+  buildWarrior,
+  reskinWarrior,
+  triggerMuzzleFlash,
+  type WarriorMesh,
+} from "./warriors";
 import { getBoardTheme, getPieceSkin, type BoardTheme, type PieceSkin } from "./skins";
 
 // Board lies in the X-Z plane. x in [0..8], z in [0..9].
-const TILE = 1.15;
-const PIECE_R = 0.4;
+const TILE = 1.05;
+const PIECE_R = 0.34;
 
 export interface SceneCallbacks {
   onMove: (m: Move) => void;
@@ -40,7 +41,7 @@ export class XiangqiScene {
   private pointer = new THREE.Vector2();
   private board: Board = createBoard();
   private turn: Side = "r";
-  private meshes = new Map<string, PieceMesh>();
+  private meshes = new Map<string, WarriorMesh>();
   private highlightGroup = new THREE.Group();
   private boardGroup = new THREE.Group();
   private decoGroup = new THREE.Group();
@@ -63,11 +64,12 @@ export class XiangqiScene {
     0,
     ((RANKS - 1) / 2) * TILE
   );
-  private spherical = new THREE.Spherical(13.5, Math.PI / 3.2, 0);
+  private spherical = new THREE.Spherical(20, Math.PI * (40 / 180), 0);
   private dragging = false;
   private lastPointer = { x: 0, y: 0 };
   private justDragged = false;
   private raf = 0;
+  private clock = new THREE.Clock();
   private worker: Worker | null = null;
   private disposed = false;
   private keyLight!: THREE.DirectionalLight;
@@ -75,7 +77,6 @@ export class XiangqiScene {
   private surfaceMat!: THREE.MeshStandardMaterial;
   private frameMat!: THREE.MeshStandardMaterial;
   private lineMat!: THREE.LineBasicMaterial;
-  private ambientStarted = false;
 
   constructor(container: HTMLElement, cb: SceneCallbacks) {
     this.container = container;
@@ -91,10 +92,10 @@ export class XiangqiScene {
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(this.boardTheme.background);
-    this.scene.fog = new THREE.Fog(this.boardTheme.fog, 18, 34);
+    this.scene.fog = new THREE.Fog(this.boardTheme.fog, 20, 38);
 
     this.camera = new THREE.PerspectiveCamera(
-      45,
+      40,
       container.clientWidth / container.clientHeight,
       0.1,
       100
@@ -127,16 +128,18 @@ export class XiangqiScene {
       this.boardTheme.keyLight,
       this.boardTheme.keyIntensity
     );
-    this.keyLight.position.set(6, 14, 8);
+    this.keyLight.position.set(6, 16, 8);
     this.keyLight.castShadow = true;
     this.keyLight.shadow.mapSize.set(2048, 2048);
     const s = this.keyLight.shadow.camera;
-    s.left = -8; s.right = 8; s.top = 8; s.bottom = -8;
-    s.near = 1; s.far = 40;
+    s.left = -10; s.right = 10; s.top = 10; s.bottom = -10;
+    s.near = 1; s.far = 45;
+    s.updateProjectionMatrix();
+    this.keyLight.shadow.bias = -0.0005;
     this.lightsGroup.add(this.keyLight);
 
-    const rim = new THREE.DirectionalLight(0x88aaff, 0.35);
-    rim.position.set(-6, 6, -6);
+    const rim = new THREE.DirectionalLight(0x88aaff, 0.4);
+    rim.position.set(-6, 8, -6);
     this.lightsGroup.add(rim);
 
     this.scene.add(this.lightsGroup);
@@ -154,10 +157,10 @@ export class XiangqiScene {
       metalness: 0.05,
     });
     const slab = new THREE.Mesh(
-      new THREE.BoxGeometry(this.boardWidth + 1.6, 0.5, this.boardDepth + 1.6),
+      new THREE.BoxGeometry(this.boardWidth + 1.4, 0.18, this.boardDepth + 1.4),
       this.frameMat
     );
-    slab.position.set(this.cameraTarget.x, -0.5, this.cameraTarget.z);
+    slab.position.set(this.cameraTarget.x, -0.32, this.cameraTarget.z);
     slab.receiveShadow = true;
     slab.castShadow = true;
     this.boardGroup.add(slab);
@@ -168,50 +171,50 @@ export class XiangqiScene {
       metalness: 0.02,
     });
     const surface = new THREE.Mesh(
-      new THREE.PlaneGeometry(this.boardWidth + 0.8, this.boardDepth + 0.8),
+      new THREE.PlaneGeometry(this.boardWidth + 0.9, this.boardDepth + 0.9),
       this.surfaceMat
     );
     surface.rotation.x = -Math.PI / 2;
-    surface.position.set(this.cameraTarget.x, -0.23, this.cameraTarget.z);
+    surface.position.set(this.cameraTarget.x, -0.22, this.cameraTarget.z);
     surface.receiveShadow = true;
     this.boardGroup.add(surface);
 
     this.lineMat = new THREE.LineBasicMaterial({ color: this.boardTheme.line });
     this.redrawLines();
 
-    // River labels
+    // River labels.
     this.makeTextPlane(
       "楚 河",
-      new THREE.Vector3(this.cameraTarget.x - 1.7, -0.21, this.cameraTarget.z),
-      2.8,
+      new THREE.Vector3(this.cameraTarget.x - 2.0, -0.205, this.cameraTarget.z),
+      3.2,
       this.boardTheme.river
     );
     this.makeTextPlane(
       "漢 界",
-      new THREE.Vector3(this.cameraTarget.x + 1.7, -0.21, this.cameraTarget.z),
-      2.8,
+      new THREE.Vector3(this.cameraTarget.x + 2.0, -0.205, this.cameraTarget.z),
+      3.2,
       this.boardTheme.river
     );
 
-    // Last move highlight
+    // Last move highlight.
     const hlm = new THREE.Mesh(
       new THREE.PlaneGeometry(TILE * 0.92, TILE * 0.92),
       new THREE.MeshBasicMaterial({
         color: 0xffd24a,
         transparent: true,
-        opacity: 0.3,
+        opacity: 0.28,
         depthWrite: false,
       })
     );
     hlm.rotation.x = -Math.PI / 2;
-    hlm.position.y = -0.2;
+    hlm.position.y = -0.19;
     hlm.visible = false;
     this.boardGroup.add(hlm);
     this.lastMoveMarker = hlm;
 
-    // Check highlight
+    // Check highlight.
     const cm = new THREE.Mesh(
-      new THREE.RingGeometry(PIECE_R * 0.7, PIECE_R * 0.98, 32),
+      new THREE.RingGeometry(PIECE_R * 0.7, PIECE_R * 1.05, 32),
       new THREE.MeshBasicMaterial({
         color: 0xff2222,
         transparent: true,
@@ -221,14 +224,13 @@ export class XiangqiScene {
       })
     );
     cm.rotation.x = -Math.PI / 2;
-    cm.position.y = -0.19;
+    cm.position.y = -0.185;
     cm.visible = false;
     this.boardGroup.add(cm);
     this.checkMarker = cm;
   }
 
   private redrawLines() {
-    // Remove existing line objects.
     const toRemove: THREE.Object3D[] = [];
     this.boardGroup.traverse((o) => {
       if ((o as THREE.LineSegments).isLineSegments) toRemove.push(o);
@@ -241,7 +243,7 @@ export class XiangqiScene {
     const positions: number[] = [];
     const halfX = this.boardWidth / 2;
     const halfZ = this.boardDepth / 2;
-    const y = -0.21;
+    const y = -0.205;
     const addLine = (x1: number, z1: number, x2: number, z2: number) => {
       positions.push(x1, y, z1, x2, y, z2);
     };
@@ -268,22 +270,18 @@ export class XiangqiScene {
     palace(true);
     palace(false);
 
-    // Position markers (the little "L" corner brackets at cannon/pawn spots).
+    // Position markers (L-shaped corner brackets).
     const markerSpots: [number, number][] = [
       [1, 2], [7, 2], [1, 7], [7, 7],
       [0, 3], [2, 3], [4, 3], [6, 3], [8, 3],
       [0, 6], [2, 6], [4, 6], [6, 6], [8, 6],
     ];
-    const b = 0.12;
-    const d = 0.06;
+    const b = 0.14;
+    const d = 0.08;
     for (const [fx, fy] of markerSpots) {
       const cx = this.cameraTarget.x - halfX + fx * TILE;
       const cz = wz(fy);
-      const corners: [number, number][] = [
-        [-1, -1], [1, -1], [-1, 1], [1, 1],
-      ];
-      // skip brackets that would point off the board edge
-      for (const [sx, sz] of corners) {
+      for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as [number, number][]) {
         if (fx === 0 && sx < 0) continue;
         if (fx === 8 && sx > 0) continue;
         const ox = cx + sx * b;
@@ -323,7 +321,6 @@ export class XiangqiScene {
   // --------------------------------------------------------------- decorations
 
   private buildDecorations() {
-    // Clear previous.
     while (this.decoGroup.children.length) {
       const c = this.decoGroup.children[0];
       this.decoGroup.remove(c);
@@ -333,7 +330,6 @@ export class XiangqiScene {
     if (accent === "none" || accent === "ink") return;
 
     if (accent === "bronze") {
-      // Four guardian lantern posts around the board.
       const postMat = new THREE.MeshStandardMaterial({
         color: 0x3a2a18,
         roughness: 0.6,
@@ -345,44 +341,33 @@ export class XiangqiScene {
         emissiveIntensity: 1.2,
         roughness: 0.4,
       });
-      const corners: [number, number][] = [
-        [-1, -1], [1, -1], [-1, 1], [1, 1],
-      ];
-      for (const [sx, sz] of corners) {
-        const post = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.08, 0.1, 2.4, 12),
-          postMat
-        );
+      for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as [number, number][]) {
+        const post = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.11, 2.6, 12), postMat);
         post.position.set(
-          this.cameraTarget.x + sx * (this.boardWidth / 2 + 1.1),
-          0.7,
-          this.cameraTarget.z + sz * (this.boardDepth / 2 + 1.1)
+          this.cameraTarget.x + sx * (this.boardWidth / 2 + 1.2),
+          0.8,
+          this.cameraTarget.z + sz * (this.boardDepth / 2 + 1.2)
         );
         post.castShadow = true;
         this.decoGroup.add(post);
-        const lantern = new THREE.Mesh(
-          new THREE.SphereGeometry(0.22, 16, 12),
-          lanternMat
-        );
-        lantern.position.set(post.position.x, 2, post.position.z);
+        const lantern = new THREE.Mesh(new THREE.SphereGeometry(0.24, 16, 12), lanternMat);
+        lantern.position.set(post.position.x, 2.2, post.position.z);
         this.decoGroup.add(lantern);
-        const pl = new THREE.PointLight(0xff7a2a, 0.8, 8);
+        const pl = new THREE.PointLight(0xff7a2a, 0.9, 9);
         pl.position.copy(lantern.position);
         this.decoGroup.add(pl);
       }
     } else if (accent === "jade") {
-      // Glowing jade orbs at the palace centers.
       const orbMat = new THREE.MeshStandardMaterial({
         color: 0x9ff5c8,
         emissive: 0x2bd687,
         emissiveIntensity: 0.8,
         roughness: 0.1,
-        metalness: 0.1,
       });
       for (const y of [1, 8]) {
-        const orb = new THREE.Mesh(new THREE.SphereGeometry(0.12, 16, 12), orbMat);
-        const [, wz] = this.gridToWorld(4, y);
-        orb.position.set(this.cameraTarget.x, -0.05, wz);
+        const orb = new THREE.Mesh(new THREE.SphereGeometry(0.13, 16, 12), orbMat);
+        const [, zw] = this.gridToWorld(4, y);
+        orb.position.set(this.cameraTarget.x, 0.05, zw);
         this.decoGroup.add(orb);
       }
     }
@@ -400,11 +385,23 @@ export class XiangqiScene {
   }
 
   private addPieceMesh(p: Piece, x: number, y: number) {
-    const pm = buildPieceMesh(p, this.pieceSkin);
+    const wm = buildWarrior(p.side, p.type, this.pieceSkin);
     const [wx, wz] = this.gridToWorld(x, y);
-    pm.group.position.set(wx, -0.23 + PIECE_H / 2, wz);
-    this.scene.add(pm.group);
-    this.meshes.set(`${x},${y}`, pm);
+    // Characters were authored a little large for this tile size; scale down
+    // and keep the labelled base flush on the board.
+    wm.group.scale.setScalar(0.72);
+    wm.group.position.set(wx, -0.13, wz);
+    // Face the opponent. Horses/elephants already face +Z; flip black to -Z.
+    wm.group.rotation.y = p.side === "r" ? 0 : Math.PI;
+    wm.group.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.isMesh) {
+        m.castShadow = true;
+        m.receiveShadow = true;
+      }
+    });
+    this.scene.add(wm.group);
+    this.meshes.set(`${x},${y}`, wm);
   }
 
   private gridToWorld(x: number, y: number): [number, number] {
@@ -427,6 +424,8 @@ export class XiangqiScene {
     const pos = new THREE.Vector3().setFromSpherical(this.spherical).add(this.cameraTarget);
     this.camera.position.copy(pos);
     this.camera.lookAt(this.cameraTarget);
+    // DEBUG
+    (window as unknown as { __cam?: unknown }).__cam = { pos: pos.toArray(), target: this.cameraTarget.toArray() };
   }
 
   // --------------------------------------------------------------- events
@@ -452,9 +451,9 @@ export class XiangqiScene {
   private onWheel = (e: WheelEvent) => {
     e.preventDefault();
     this.spherical.radius = THREE.MathUtils.clamp(
-      this.spherical.radius + e.deltaY * 0.01,
-      7,
-      22
+      this.spherical.radius + e.deltaY * 0.012,
+      8,
+      26
     );
     this.updateCamera();
   };
@@ -497,6 +496,7 @@ export class XiangqiScene {
     this.pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
     this.raycaster.setFromCamera(this.pointer, this.camera);
 
+    // Pick the board plane near the surface.
     const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0.2);
     const point = new THREE.Vector3();
     if (!this.raycaster.ray.intersectPlane(plane, point)) return;
@@ -513,7 +513,6 @@ export class XiangqiScene {
         this.clearHighlights();
         this.selected = null;
         this.cb.onSelectChange([]);
-        sound.play("move", { pan });
         void this.playMove(move);
         return;
       }
@@ -534,7 +533,6 @@ export class XiangqiScene {
     }
   }
 
-  /** Map a file x to a stereo pan from the current camera angle. */
   private screenPan(x: number): number {
     const [wx] = this.gridToWorld(x, 0);
     const v = new THREE.Vector3(wx, 0, this.cameraTarget.z).project(this.camera);
@@ -549,8 +547,8 @@ export class XiangqiScene {
       const [wx, wz] = this.gridToWorld(m.to[0], m.to[1]);
       const cap = !!m.captured;
       const geo = cap
-        ? new THREE.RingGeometry(PIECE_R * 0.8, PIECE_R * 1.02, 32)
-        : new THREE.CircleGeometry(0.15, 24);
+        ? new THREE.RingGeometry(PIECE_R * 0.8, PIECE_R * 1.05, 32)
+        : new THREE.CircleGeometry(0.16, 24);
       const mat = new THREE.MeshBasicMaterial({
         color: cap ? 0xe0403a : 0x4adf7a,
         transparent: true,
@@ -560,7 +558,7 @@ export class XiangqiScene {
       });
       const marker = new THREE.Mesh(geo, mat);
       marker.rotation.x = -Math.PI / 2;
-      marker.position.set(wx, -0.19, wz);
+      marker.position.set(wx, -0.18, wz);
       this.highlightGroup.add(marker);
       this.moveMarkers.push(marker);
     }
@@ -577,10 +575,6 @@ export class XiangqiScene {
 
   // --------------------------------------------------------------- moves
 
-  private isInCheckSide(side: Side): boolean {
-    return isInCheck(this.board, side);
-  }
-
   private async playMove(m: Move) {
     this.animating = true;
     const fromKey = `${m.from[0]},${m.from[1]}`;
@@ -592,18 +586,29 @@ export class XiangqiScene {
     }
     const pan = this.screenPan(m.to[0]);
     const weight = this.pieceWeight(m.piece);
+    sound.play("move", { pan });
 
-    const captured = this.meshes.get(toKey);
-    if (captured) {
-      await this.animateCapture(captured);
-      this.scene.remove(captured.group);
-      this.disposeMesh(captured);
-      this.meshes.delete(toKey);
-      sound.play("capture", { pan, weight });
+    // Turn to face the destination.
+    const [fx, fz] = this.gridToWorld(m.from[0], m.from[1]);
+    const [tx, tz] = this.gridToWorld(m.to[0], m.to[1]);
+    const targetRot = Math.atan2(tx - fx, tz - fz);
+    mover.group.rotation.y = targetRot;
+
+    // Cannon muzzle flash when capturing.
+    if (m.piece === "C" && m.captured) {
+      triggerMuzzleFlash(mover.figure);
     }
 
-    await this.animateMove(mover, m.to[0], m.to[1]);
-    // Place sound for non-captures; captures already got the clank.
+    const captured = this.meshes.get(toKey);
+    // March to the destination with legs/wheels animating; capture on arrival.
+    await this.animateMarch(mover, m.to[0], m.to[1], () => {
+      if (captured && captured.group.visible) {
+        this.scene.remove(captured.group);
+        this.disposeMesh(captured);
+        this.meshes.delete(toKey);
+        sound.play("capture", { pan, weight });
+      }
+    });
     if (!captured) sound.play("place", { pan, weight: weight * 0.6 });
 
     this.meshes.delete(fromKey);
@@ -619,8 +624,7 @@ export class XiangqiScene {
     this.cb.onBoardChange(this.board, this.turn);
     this.animating = false;
 
-    // Check / checkmate detection.
-    const foeInCheck = this.isInCheckSide(this.turn);
+    const foeInCheck = isInCheck(this.board, this.turn);
     this.updateCheckMarker(foeInCheck ? m.to : null);
     this.cb.onCheck(foeInCheck ? this.turn : null);
 
@@ -642,7 +646,7 @@ export class XiangqiScene {
   private updateLastMoveMarker() {
     if (!this.lastMoveMarker || !this.lastMove) return;
     const [wx, wz] = this.gridToWorld(this.lastMove.to[0], this.lastMove.to[1]);
-    this.lastMoveMarker.position.set(wx, -0.195, wz);
+    this.lastMoveMarker.position.set(wx, -0.19, wz);
     this.lastMoveMarker.visible = true;
   }
 
@@ -653,33 +657,52 @@ export class XiangqiScene {
       return;
     }
     const [wx, wz] = this.gridToWorld(pos[0], pos[1]);
-    this.checkMarker.position.set(wx, -0.185, wz);
+    this.checkMarker.position.set(wx, -0.18, wz);
     this.checkMarker.visible = true;
   }
 
-  private animateMove(m: PieceMesh, tx: number, ty: number): Promise<void> {
+  /**
+   * March a figure from its current square to (tx, ty). The figure's legs/wheels
+   * swing while it travels and settle on arrival. `onArrive` fires once on the
+   * final frame (used to remove the captured piece).
+   */
+  private animateMarch(
+    wm: WarriorMesh,
+    tx: number,
+    ty: number,
+    onArrive: () => void
+  ): Promise<void> {
     return new Promise((resolve) => {
       const [wx, wz] = this.gridToWorld(tx, ty);
-      const start = m.group.position.clone();
+      const start = wm.group.position.clone();
       const end = new THREE.Vector3(wx, start.y, wz);
-      const duration = 280;
+      const dist = start.distanceTo(end);
+      const baseY = start.y;
+      // Longer journeys take a little longer; wheels/legs look right at ~speed 3/s.
+      const duration = Math.max(320, dist * 230);
+      const hop = wm.figure.wheels.length > 0 ? 0.05 : 0.12;
       const t0 = performance.now();
-      const hop = m.piece.type === "H" ? 0.9 : m.piece.type === "R" ? 0.5 : 0.35;
-      // Face direction of travel.
-      const dx = end.x - start.x;
-      const dz = end.z - start.z;
-      if (Math.abs(dx) + Math.abs(dz) > 0.001) {
-        const targetRot = Math.atan2(dx, dz);
-        m.group.rotation.y = targetRot;
-      }
+      let arrived = false;
+
       const tick = () => {
         const t = Math.min(1, (performance.now() - t0) / duration);
         const e = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
-        m.group.position.lerpVectors(start, end, e);
-        m.group.position.y = start.y + Math.sin(t * Math.PI) * hop;
-        if (t < 1) requestAnimationFrame(tick);
-        else {
-          m.group.position.copy(end);
+        wm.group.position.lerpVectors(start, end, e);
+        // Foot/vehicle bob.
+        if (wm.figure.wheels.length > 0) {
+          wm.group.position.y = baseY + Math.sin(t * Math.PI * 6) * 0.012;
+        } else {
+          wm.group.position.y = baseY + Math.abs(Math.sin(t * Math.PI * 4)) * hop;
+        }
+        if (t < 1) {
+          requestAnimationFrame(tick);
+        } else {
+          wm.group.position.copy(end);
+          wm.group.position.y = baseY;
+          if (!arrived) {
+            arrived = true;
+            onArrive();
+          }
           resolve();
         }
       };
@@ -687,36 +710,18 @@ export class XiangqiScene {
     });
   }
 
-  private animateCapture(m: PieceMesh): Promise<void> {
-    return new Promise((resolve) => {
-      const startY = m.group.position.y;
-      const startRot = m.group.rotation.y;
-      const t0 = performance.now();
-      const duration = 320;
-      const tick = () => {
-        const t = Math.min(1, (performance.now() - t0) / duration);
-        m.group.position.y = startY + t * 1.8;
-        m.group.rotation.y = startRot + t * Math.PI * 3;
-        const s = 1 - t * 0.7;
-        m.group.scale.setScalar(Math.max(0.01, s));
-        if (t < 1) requestAnimationFrame(tick);
-        else {
-          m.group.visible = false;
-          resolve();
-        }
-      };
-      tick();
-    });
-  }
-
-  private disposeMesh(m: PieceMesh) {
-    [m.base.material, m.finial.material, m.rim.material, m.label.material].forEach(
-      (mat) => {
-        const mm = mat as THREE.MeshStandardMaterial | THREE.SpriteMaterial;
-        if ("map" in mm && mm.map) mm.map.dispose();
+  private disposeMesh(wm: WarriorMesh) {
+    wm.group.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      const mat = mesh.material as THREE.Material | THREE.Material[];
+      const mats = Array.isArray(mat) ? mat : [mat];
+      for (const m of mats) {
+        const mm = m as THREE.MeshStandardMaterial;
+        if (mm.map) mm.map.dispose();
         mm.dispose();
       }
-    );
+    });
   }
 
   // --------------------------------------------------------------- game flow
@@ -778,7 +783,11 @@ export class XiangqiScene {
 
   setPieceSkin(id: string) {
     this.pieceSkin = getPieceSkin(id);
-    for (const m of this.meshes.values()) reskinPieceMesh(m, this.pieceSkin);
+    for (const [key, wm] of this.meshes) {
+      const [x, y] = key.split(",").map(Number);
+      const piece = this.board[y][x];
+      if (piece) reskinWarrior(wm, piece.side, this.pieceSkin);
+    }
   }
 
   setBoardTheme(id: string) {
@@ -796,17 +805,7 @@ export class XiangqiScene {
     this.keyLight.intensity = t.keyIntensity;
     this.redrawLines();
     this.buildDecorations();
-    if (!this.ambientStarted && this.ctxAlive()) {
-      sound.resume();
-      sound.startAmbience(t.ambience);
-      this.ambientStarted = true;
-    } else {
-      sound.startAmbience(t.ambience);
-    }
-  }
-
-  private ctxAlive() {
-    return true;
+    sound.startAmbience(t.ambience);
   }
 
   reset() {
@@ -828,7 +827,6 @@ export class XiangqiScene {
     sound.resume();
     sound.play("start");
     sound.startAmbience(this.boardTheme.ambience);
-    this.ambientStarted = true;
     if (this.mode === "ai" && this.turn !== this.humanSide) this.runAI();
   }
 
@@ -837,18 +835,19 @@ export class XiangqiScene {
   private animate = () => {
     if (this.disposed) return;
     this.raf = requestAnimationFrame(this.animate);
-    // Subtle idle bob for all pieces.
-    const t = performance.now() * 0.001;
-    let i = 0;
-    for (const m of this.meshes.values()) {
-      if (!m.group.visible) continue;
-      const base = -0.23 + PIECE_H / 2;
-      // Only bob pieces not currently animating (the move handler overwrites y).
-      if (Math.abs(m.group.position.y - base) < 0.05 && !this.animating) {
-        m.group.position.y = base + Math.sin(t * 1.5 + i * 0.7) * 0.01;
+    const delta = Math.min(this.clock.getDelta(), 0.05);
+    const time = this.clock.elapsedTime;
+
+    // Animate every figure. Pieces involved in a move march; the rest idle.
+    for (const [key, wm] of this.meshes) {
+      let marching = 0;
+      if (this.animating && this.lastMove) {
+        const fk = `${this.lastMove.from[0]},${this.lastMove.from[1]}`;
+        if (key === fk) marching = 1;
       }
-      i++;
+      animateFigure(wm.figure, time, delta, marching);
     }
+
     this.renderer.render(this.scene, this.camera);
   };
 
@@ -864,6 +863,8 @@ export class XiangqiScene {
     el.removeEventListener("wheel", this.onWheel);
     this.worker?.terminate();
     sound.stopAmbience();
+    for (const m of this.meshes.values()) this.disposeMesh(m);
+    this.meshes.clear();
     this.renderer.dispose();
     if (el.parentNode) el.parentNode.removeChild(el);
   }
