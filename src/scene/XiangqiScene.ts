@@ -3,6 +3,7 @@ import {
   FILES,
   RANKS,
   createBoard,
+  findKing,
   gameStatus,
   isInCheck,
   legalMovesFrom,
@@ -18,6 +19,18 @@ import {
   type WarriorMesh,
 } from "./warriors";
 import { getBoardTheme, getPieceSkin, type BoardTheme, type PieceSkin } from "./skins";
+import {
+  clearEffects,
+  clearPetals,
+  makeBanner,
+  spawnCapture,
+  spawnCheckPulse,
+  spawnDust,
+  spawnFlame,
+  spawnPetals,
+  spawnRipple,
+  updateEffects,
+} from "./effects";
 
 // Board lies in the X-Z plane. x in [0..8], z in [0..9].
 const TILE = 1.05;
@@ -329,7 +342,21 @@ export class XiangqiScene {
       this.decoGroup.remove(c);
       ((c as THREE.Mesh).geometry as THREE.BufferGeometry)?.dispose?.();
     }
+    // Clean ambient effects, then re-add per theme.
+    clearPetalsAndFlames(this.scene);
     const accent = this.boardTheme.accent ?? "none";
+
+    // Ambient petals for the calm themes.
+    if (accent === "none" || accent === "jade") {
+      spawnPetals(
+        this.scene,
+        { x: this.boardWidth, z: this.boardDepth },
+        1.6,
+        accent === "jade" ? 18 : 26,
+        accent === "jade" ? 0xc9f2da : 0xf2c9c9
+      );
+    }
+
     if (accent === "none" || accent === "ink") return;
 
     if (accent === "bronze") {
@@ -359,6 +386,8 @@ export class XiangqiScene {
         const pl = new THREE.PointLight(0xff7a2a, 0.9, 9);
         pl.position.copy(lantern.position);
         this.decoGroup.add(pl);
+        // Flickering flame on each torch.
+        spawnFlame(this.scene, post.position.x, 2.42, post.position.z, 0.15);
       }
     } else if (accent === "jade") {
       const orbMat = new THREE.MeshStandardMaterial({
@@ -405,6 +434,21 @@ export class XiangqiScene {
     });
     this.scene.add(wm.group);
     this.meshes.set(`${x},${y}`, wm);
+
+    // Chariots carry a waving standard.
+    if (p.type === "R") {
+      const side = p.side;
+      makeBanner(
+        wm.figure.root,
+        0.02,
+        0.55,
+        -0.16,
+        0.14,
+        0.18,
+        side === "r" ? 0xd8403a : 0x2a4a6a,
+        0.05
+      );
+    }
   }
 
   private gridToWorld(x: number, y: number): [number, number] {
@@ -603,6 +647,13 @@ export class XiangqiScene {
     }
 
     const captured = this.meshes.get(toKey);
+    const victimColor = captured
+      ? captured.piece.side === "r"
+        ? 0xe0403a
+        : 0xcfd3da
+      : m.side === "r"
+      ? 0xcfd3da
+      : 0xe0403a;
     // March to the destination with legs/wheels animating; capture on arrival.
     await this.animateMarch(mover, m.to[0], m.to[1], () => {
       if (captured && captured.group.visible) {
@@ -610,7 +661,12 @@ export class XiangqiScene {
         this.disposeMesh(captured);
         this.meshes.delete(toKey);
         sound.play("capture", { pan, weight });
+        // Capture burst in the victim's colour.
+        spawnCapture(this.scene, tx, tz, victimColor, 0.1);
+      } else {
+        spawnRipple(this.scene, tx, tz);
       }
+      spawnDust(this.scene, tx, tz, 0.02, 8);
     });
     if (!captured) sound.play("place", { pan, weight: weight * 0.6 });
 
@@ -742,7 +798,14 @@ export class XiangqiScene {
       sound.play(this.humanSide === "b" ? "win" : "lose");
       this.cb.onGameOver("b");
     } else {
-      if (inCheck) sound.play("check", { pan: 0 });
+      if (inCheck) {
+        sound.play("check", { pan: 0 });
+        const king = findKing(this.board, this.turn);
+        if (king) {
+          const [wx, wz] = this.gridToWorld(king[0], king[1]);
+          spawnCheckPulse(this.scene, wx, wz, 0.1);
+        }
+      }
       if (this.mode === "ai" && this.turn !== this.humanSide) this.runAI();
     }
   }
@@ -907,6 +970,8 @@ export class XiangqiScene {
       animateFigure(wm.figure, time, delta, marching);
     }
 
+    updateEffects(this.scene, delta, time);
+
     this.renderer.render(this.scene, this.camera);
   };
 
@@ -922,9 +987,15 @@ export class XiangqiScene {
     el.removeEventListener("wheel", this.onWheel);
     this.worker?.terminate();
     sound.stopAmbience();
+    clearEffects(this.scene);
     for (const m of this.meshes.values()) this.disposeMesh(m);
     this.meshes.clear();
     this.renderer.dispose();
     if (el.parentNode) el.parentNode.removeChild(el);
   }
+}
+
+// Rebuild the ambient petal/flame layer (cheap standalone helper).
+function clearPetalsAndFlames(scene: THREE.Scene) {
+  clearPetals(scene);
 }

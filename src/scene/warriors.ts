@@ -13,7 +13,7 @@
  */
 
 import * as THREE from "three";
-import type { PieceType, Side } from "../game/types";
+import type { Piece, PieceType, Side } from "../game/types";
 import { PIECE_NAMES } from "../game/engine";
 import type { PieceSkin } from "./skins";
 
@@ -560,14 +560,14 @@ function buildChariot(p: WarriorPalette): Figure {
   const panelL = mesh(box(0.018, 0.12, 0.38), p.glazeDeep, -0.225, 0.33, 0);
   const panelR = panelL.clone();
   panelR.position.x = 0.225;
-  // Banner pole.
+  // Banner pole: kept short so the standard reads clearly without towering.
   const pole = new THREE.Group();
   pole.position.set(-0.1, 0.42, -0.1);
   pole.rotation.z = 0.12;
-  pole.add(mesh(cyl(0.014, 0.016, 0.55), p.wood, 0, 0.22, 0));
-  const banner = mesh(box(0.018, 0.05, 0.14), p.trim, 0, 0.47, 0.05);
+  pole.add(mesh(cyl(0.014, 0.016, 0.38), p.wood, 0, 0.14, 0));
+  const banner = mesh(box(0.018, 0.05, 0.14), p.trim, 0, 0.28, 0.05);
   pole.add(banner);
-  pole.add(mesh(cone(0.02, 0.07, 8), p.trim, 0, 0.53, 0));
+  pole.add(mesh(cone(0.018, 0.05, 8), p.trim, 0, 0.36, 0));
   body.add(hull, railFront, railL, railR, panelL, panelR, pole);
   f.root.add(body);
 
@@ -718,13 +718,14 @@ function buildSoldier(p: WarriorPalette): Figure {
   brim.rotation.x = Math.PI / 2;
   helmet.add(brim);
 
-  // Spear held forward.
+  // Spear: shorter, held upright at the side so it doesn't poke into the
+  // neighbouring square.
   const spear = new THREE.Group();
-  spear.position.set(0.19, 0.06, 0.05);
-  spear.add(mesh(cyl(0.011, 0.013, 0.62), p.wood, 0, 0.31, 0));
-  spear.add(mesh(cone(0.024, 0.09, 8), p.trim, 0, 0.66, 0));
-  spear.add(mesh(cone(0.03, 0.06, 8), p.glaze, 0, 0.6, 0));
-  spear.add(mesh(tor(0.088, 0.01), p.trim, 0, 0.635, 0));
+  spear.position.set(0.14, 0.12, 0.02);
+  spear.add(mesh(cyl(0.01, 0.012, 0.4), p.wood, 0, 0.26, 0));
+  spear.add(mesh(cone(0.02, 0.07, 8), p.trim, 0, 0.48, 0));
+  spear.add(mesh(cone(0.026, 0.05, 8), p.glaze, 0, 0.42, 0));
+  spear.add(mesh(tor(0.075, 0.008), p.trim, 0, 0.44, 0));
   f.root.add(
     ...legs,
     torso,
@@ -770,18 +771,26 @@ export interface WarriorMesh {
   figure: Figure;
   baseLabel: THREE.MeshStandardMaterial;
   palette: WarriorPalette;
+  piece: Piece;
 }
 
 export function buildWarrior(
   side: Side,
   type: PieceType,
-  skin: PieceSkin
+  skin: PieceSkin,
+  piece?: Piece
 ): WarriorMesh {
   const palette = makePalette(side, skin);
   const fig = BUILDERS[type](palette);
   const { base, labelMat } = buildBase(side, type, skin, palette);
   fig.root.add(base);
-  return { group: fig.root, figure: fig, baseLabel: labelMat, palette };
+  return {
+    group: fig.root,
+    figure: fig,
+    baseLabel: labelMat,
+    palette,
+    piece: piece ?? { side, type, id: -1 },
+  };
 }
 
 /** Re-skin an existing warrior in place (shared geometry, swapped materials). */
