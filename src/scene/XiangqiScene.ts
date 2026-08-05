@@ -60,6 +60,7 @@ export class XiangqiScene {
   private boardGroup = new THREE.Group();
   private decoGroup = new THREE.Group();
   private lightsGroup = new THREE.Group();
+  private mountainsGroup = new THREE.Group();
   private moveMarkers: THREE.Mesh[] = [];
   private selected: [number, number] | null = null;
   private lastMove: Move | null = null;
@@ -78,7 +79,7 @@ export class XiangqiScene {
     0,
     ((RANKS - 1) / 2) * TILE
   );
-  private spherical = new THREE.Spherical(20, Math.PI * (40 / 180), 0);
+  private spherical = new THREE.Spherical(16, Math.PI * (42 / 180), 0);
   private dragging = false;
   private lastPointer = { x: 0, y: 0 };
   private justDragged = false;
@@ -108,10 +109,10 @@ export class XiangqiScene {
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(this.boardTheme.background);
-    this.scene.fog = new THREE.Fog(this.boardTheme.fog, 20, 38);
+    this.scene.fog = new THREE.Fog(this.boardTheme.fog, 26, 70);
 
     this.camera = new THREE.PerspectiveCamera(
-      40,
+      46,
       container.clientWidth / container.clientHeight,
       0.1,
       100
@@ -121,9 +122,11 @@ export class XiangqiScene {
     this.buildLights();
     this.scene.add(this.boardGroup);
     this.scene.add(this.decoGroup);
+    this.scene.add(this.mountainsGroup);
     this.scene.add(this.highlightGroup);
     this.buildBoard();
     this.buildDecorations();
+    this.buildMountains();
     this.buildPieces();
 
     this.bindEvents();
@@ -136,7 +139,7 @@ export class XiangqiScene {
     this.hemi = new THREE.HemisphereLight(
       this.boardTheme.hemiSky,
       this.boardTheme.hemiGround,
-      0.7
+      1.35
     );
     this.lightsGroup.add(this.hemi);
 
@@ -154,7 +157,12 @@ export class XiangqiScene {
     this.keyLight.shadow.bias = -0.0005;
     this.lightsGroup.add(this.keyLight);
 
-    const rim = new THREE.DirectionalLight(0x88aaff, 0.4);
+    // Fill light from the opposite side so pieces never fall into shadow.
+    const fill = new THREE.DirectionalLight(0xfff0d8, 0.9);
+    fill.position.set(-8, 6, -6);
+    this.lightsGroup.add(fill);
+
+    const rim = new THREE.DirectionalLight(0x88aaff, 0.5);
     rim.position.set(-6, 8, -6);
     this.lightsGroup.add(rim);
 
@@ -405,6 +413,75 @@ export class XiangqiScene {
     }
   }
 
+  // --------------------------------------------------------------- mountains
+
+  /**
+   * Distant ink-wash style mountain ridges behind the board, tinted by theme.
+   * Rebuilt whenever the board theme changes.
+   */
+  private buildMountains() {
+    while (this.mountainsGroup.children.length) {
+      const c = this.mountainsGroup.children[0];
+      this.mountainsGroup.remove(c);
+      (c as THREE.Mesh).geometry?.dispose?.();
+      ((c as THREE.Mesh).material as THREE.Material)?.dispose?.();
+    }
+    const accent = this.boardTheme.accent ?? "none";
+    const ridgeColor =
+      accent === "ink"
+        ? new THREE.Color(0x6a6a66)
+        : accent === "jade"
+        ? new THREE.Color(0x24352c)
+        : accent === "bronze"
+        ? new THREE.Color(0x2c1e12)
+        : new THREE.Color(0x3c2c1c);
+
+    const makeRidge = (
+      cx: number,
+      cz: number,
+      width: number,
+      height: number,
+      opacity: number,
+      seed: number
+    ) => {
+      const shape = new THREE.Shape();
+      const segs = 9;
+      shape.moveTo(-width / 2, 0);
+      for (let i = 1; i < segs; i++) {
+        const x = -width / 2 + (i / segs) * width;
+        const y =
+          Math.sin(i * 2.7 + seed) * height * 0.22 +
+          Math.sin(i * 1.3 + seed * 3) * height * 0.14;
+        shape.lineTo(x, Math.max(0.3, y));
+      }
+      shape.lineTo(width / 2, 0);
+      shape.closePath();
+      const geo = new THREE.ShapeGeometry(shape);
+      const mat = new THREE.MeshBasicMaterial({
+        color: ridgeColor,
+        transparent: true,
+        opacity,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.set(cx, 0, cz);
+      // Face the board centre so the ridge reads as a silhouette from play.
+      mesh.rotation.y = Math.atan2(cx - this.cameraTarget.x, cz - this.cameraTarget.z);
+      this.mountainsGroup.add(mesh);
+    };
+
+    // Ridges ringing the board so every camera angle has a backdrop.
+    const halfW = this.boardWidth / 2 + 8;
+    const halfD = this.boardDepth / 2 + 8;
+    const cx = this.cameraTarget.x;
+    const cz = this.cameraTarget.z;
+    makeRidge(cx, cz - halfD, 40, 6.2, 0.6, 1.3); // far (behind black)
+    makeRidge(cx, cz + halfD, 44, 7.4, 0.5, 4.7); // near (behind red)
+    makeRidge(cx - halfW, cz + 1, 30, 5.4, 0.55, 2.9); // left
+    makeRidge(cx + halfW, cz - 1, 30, 5.8, 0.55, 6.1); // right
+  }
+
   // --------------------------------------------------------------- pieces
 
   private buildPieces() {
@@ -421,7 +498,7 @@ export class XiangqiScene {
     const [wx, wz] = this.gridToWorld(x, y);
     // Characters were authored a little large for this tile size; scale down
     // and keep the labelled base flush on the board.
-    wm.group.scale.setScalar(0.72);
+    wm.group.scale.setScalar(0.95);
     wm.group.position.set(wx, -0.13, wz);
     // Face the opponent. Horses/elephants already face +Z; flip black to -Z.
     wm.group.rotation.y = p.side === "r" ? 0 : Math.PI;
@@ -926,6 +1003,7 @@ export class XiangqiScene {
     this.keyLight.intensity = t.keyIntensity;
     this.redrawLines();
     this.buildDecorations();
+    this.buildMountains();
     sound.startAmbience(t.ambience);
   }
 
