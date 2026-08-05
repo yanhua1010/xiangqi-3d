@@ -130,8 +130,8 @@
 
     const toggle = document.createElement("button");
     toggle.className = "gf-btn";
-    toggle.textContent = "皮肤";
-    toggle.title = "切换棋子皮肤";
+    toggle.textContent = "套装";
+    toggle.title = "切换棋子与棋盘套装";
     toggle.addEventListener("click", () => state.panel.classList.toggle("open"));
     const firstControls = side.querySelector(".gf-controls");
     firstControls?.appendChild(toggle);
