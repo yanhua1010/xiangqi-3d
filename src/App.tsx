@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { XiangqiScene } from "./scene/XiangqiScene";
 import { BOARD_THEMES, PIECE_SKINS } from "./scene/skins";
-import { PIECE_NAMES } from "./game/engine";
-import { sound } from "./audio/SoundEngine";
+import { moveToChinese, PIECE_NAMES } from "./game/engine";import { sound } from "./audio/SoundEngine";
 import type { Board, Difficulty, Move, Side } from "./game/types";
 
 function moveNotation(m: Move): string {
@@ -19,11 +18,12 @@ function moveNotation(m: Move): string {
 export default function App() {
   const mountRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<XiangqiScene | null>(null);
-  const [, setBoard] = useState<Board | null>(null);
+  const boardRef = useRef<Board | null>(null);
+  const [board, setBoard] = useState<Board | null>(null);
   const [turn, setTurn] = useState<Side>("r");
   const [thinking, setThinking] = useState(false);
   const [moves, setMoves] = useState<Move[]>([]);
-  const [history, setHistory] = useState<Move[]>([]);
+  const [history, setHistory] = useState<{ chinese: string; side: Side }[]>([]);
   const [winner, setWinner] = useState<Side | "draw" | null>(null);
   const [inCheck, setInCheck] = useState<Side | null>(null);
   const [mode, setMode] = useState<"ai" | "hotseat">("ai");
@@ -35,13 +35,22 @@ export default function App() {
   const [muted, setMuted] = useState(false);
   const [sfxVol, setSfxVol] = useState(0.9);
   const [showSettings, setShowSettings] = useState(false);
+  const [suggestions, setSuggestions] = useState<Move[]>([]);
 
   useEffect(() => {
     if (!started || !mountRef.current) return;
     sound.resume();
     const scene = new XiangqiScene(mountRef.current, {
-      onMove: (m) => setHistory((h) => [...h, m]),
+      onMove: (m) => {
+        // Compute notation synchronously: the history updater runs later, by
+        // which point boardRef would already be the post-move board.
+        const chinese = boardRef.current
+          ? moveToChinese(boardRef.current, m)
+          : moveNotation(m);
+        setHistory((h) => [...h, { chinese, side: m.side }]);
+      },
       onBoardChange: (b, t) => {
+        boardRef.current = b.map((row) => [...row]);
         setBoard(b.map((row) => [...row]));
         setTurn(t);
       },
@@ -51,6 +60,7 @@ export default function App() {
       onThinkingChange: setThinking,
       onSelectChange: setMoves,
       onCheck: setInCheck,
+      onSuggestions: setSuggestions,
     });
     scene.setOptions({ mode, humanSide, difficulty });
     scene.setPieceSkin(pieceSkin);
@@ -97,6 +107,7 @@ export default function App() {
     setInCheck(null);
     setHistory([]);
     setMoves([]);
+    setSuggestions([]);
     sceneRef.current?.reset();
   };
 
@@ -204,7 +215,7 @@ export default function App() {
                 {Math.floor(i / 2) + 1}
                 {i % 2 ? ".." : "."}
               </span>
-              {moveNotation(m)}
+              {m.chinese}
             </li>
           ))}
           {history.length === 0 && <li className="empty">尚未走棋</li>}
@@ -216,6 +227,21 @@ export default function App() {
 
       {moves.length > 0 && (
         <div className="hud select-hud">可选 {moves.length} 个落点</div>
+      )}
+
+      {suggestions.length > 0 && !winner && (
+        <div className="hud suggest-hud">
+          <span className="suggest-label">🤖 推荐走法</span>
+          {suggestions.map((m, i) => (
+            <button
+              key={i}
+              className="suggest-chip"
+              onClick={() => sceneRef.current?.playSuggestedMove(m)}
+            >
+              <b>{i + 1}</b> {board ? moveToChinese(board, m) : `${m.from}→${m.to}`}
+            </button>
+          ))}
+        </div>
       )}
 
       {winner && (
@@ -255,8 +281,15 @@ function MainMenu({
   boardTheme: string;
   setBoardTheme: (s: string) => void;
 }) {
+  const [mode, setMode] = useState<"ai" | "hotseat">("ai");
   const [side, setSide] = useState<Side>("r");
   const [diff, setDiff] = useState<Difficulty>("medium");
+
+  const playUi = () => sound.play("ui");
+  const start = () => {
+    sound.play("start");
+    onStart(mode, mode === "hotseat" ? "r" : side, diff);
+  };
 
   return (
     <div className="menu">
@@ -267,39 +300,72 @@ function MainMenu({
         <div className="field">
           <label>对局模式</label>
           <div className="segmented">
-            <button className="primary" onClick={() => onStart("ai", side, diff)}>
+            <button
+              className={mode === "ai" ? "active" : ""}
+              onClick={() => {
+                setMode("ai");
+                playUi();
+              }}
+            >
               人机对战
             </button>
-            <button onClick={() => onStart("hotseat", "r", diff)}>双人同机</button>
-          </div>
-        </div>
-
-        <div className="field">
-          <label>执子（人机）</label>
-          <div className="segmented">
-            <button className={side === "r" ? "active" : ""} onClick={() => setSide("r")}>
-              红方（先手）
-            </button>
-            <button className={side === "b" ? "active" : ""} onClick={() => setSide("b")}>
-              黑方（后手）
+            <button
+              className={mode === "hotseat" ? "active" : ""}
+              onClick={() => {
+                setMode("hotseat");
+                playUi();
+              }}
+            >
+              双人同机
             </button>
           </div>
         </div>
 
-        <div className="field">
-          <label>AI 难度</label>
-          <div className="segmented">
-            {(["easy", "medium", "hard"] as Difficulty[]).map((d) => (
-              <button
-                key={d}
-                className={diff === d ? "active" : ""}
-                onClick={() => setDiff(d)}
-              >
-                {d === "easy" ? "简单" : d === "medium" ? "中等" : "困难"}
-              </button>
-            ))}
-          </div>
-        </div>
+        {mode === "ai" && (
+          <>
+            <div className="field">
+              <label>执子</label>
+              <div className="segmented">
+                <button
+                  className={side === "r" ? "active" : ""}
+                  onClick={() => {
+                    setSide("r");
+                    playUi();
+                  }}
+                >
+                  红方（先手）
+                </button>
+                <button
+                  className={side === "b" ? "active" : ""}
+                  onClick={() => {
+                    setSide("b");
+                    playUi();
+                  }}
+                >
+                  黑方（后手）
+                </button>
+              </div>
+            </div>
+
+            <div className="field">
+              <label>AI 难度</label>
+              <div className="segmented">
+                {(["easy", "medium", "hard"] as Difficulty[]).map((d) => (
+                  <button
+                    key={d}
+                    className={diff === d ? "active" : ""}
+                    onClick={() => {
+                      setDiff(d);
+                      playUi();
+                    }}
+                  >
+                    {d === "easy" ? "简单" : d === "medium" ? "中等" : "困难"}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
 
         <div className="field">
           <label>棋子材质</label>
@@ -308,7 +374,10 @@ function MainMenu({
               <button
                 key={s.id}
                 className={pieceSkin === s.id ? "chip active" : "chip"}
-                onClick={() => setPieceSkin(s.id)}
+                onClick={() => {
+                  setPieceSkin(s.id);
+                  playUi();
+                }}
               >
                 {s.name}
               </button>
@@ -323,13 +392,20 @@ function MainMenu({
               <button
                 key={t.id}
                 className={boardTheme === t.id ? "chip active" : "chip"}
-                onClick={() => setBoardTheme(t.id)}
+                onClick={() => {
+                  setBoardTheme(t.id);
+                  playUi();
+                }}
               >
                 {t.name}
               </button>
             ))}
           </div>
         </div>
+
+        <button className="start-btn" onClick={start}>
+          开始游戏
+        </button>
 
         <p className="foot">
           完整规则：马腿、象眼、炮架、九宫、将帅不照面、将军将死。

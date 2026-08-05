@@ -315,3 +315,61 @@ export function gameStatus(b: Board, sideToMove: Side): Status {
   // Perpetual-check handling is omitted; offer a draw only via UI.
   return "playing";
 }
+
+// --------------------------------------------------------------- notation
+
+const CN_NUM = "一二三四五六七八九";
+
+/**
+ * Classic Chinese notation for a move, e.g. "炮二平五", "马八进七", "前车进一".
+ * Uses the mover's own perspective (red reads left→right 1..9, black the
+ * reverse), disambiguates same-file pieces with 前/后 and same-rank pieces
+ * with 左/右.
+ */
+export function moveToChinese(b: Board, m: Move): string {
+  const name = PIECE_NAMES[m.side][m.piece];
+  const [fx, fy] = m.from;
+  const [tx, ty] = m.to;
+  // File number from the mover's perspective.
+  const file = (x: number) => (m.side === "r" ? x + 1 : 9 - x);
+  // Advancing means y decreasing for red, increasing for black.
+  const isAdvance = (y: number) => (m.side === "r" ? y < fy : y > fy);
+
+  // Collect same-type pieces to disambiguate.
+  const same: [number, number][] = [];
+  for (let y = 0; y < RANKS; y++)
+    for (let x = 0; x < FILES; x++) {
+      const p = b[y][x];
+      if (p && p.type === m.piece && p.side === m.side && !(x === fx && y === fy))
+        same.push([x, y]);
+    }
+  const sameCol = same.filter(([x]) => x === fx);
+
+  let head: string;
+  if (sameCol.length > 0) {
+    // 前/后 — red: 前 = smaller y; black: 前 = larger y.
+    const mine = m.side === "r" ? fy < sameCol[0][1] : fy > sameCol[0][1];
+    head = (mine ? "前" : "后") + name;
+  } else {
+    // Same-rank pieces live on different files, so the file number alone is
+    // unambiguous — no 左/右 needed.
+    head = name + CN_NUM[file(fx) - 1];
+  }
+
+  // Destination.
+  let tail: string;
+  const dx = tx - fx;
+  const dy = ty - fy;
+  if (dy === 0) {
+    // Horizontal move (also crossed-river pawns).
+    tail = "平" + CN_NUM[file(tx) - 1];
+  } else if (dx !== 0) {
+    // Diagonal move (horse/elephant/advisor): name the destination file.
+    tail = (isAdvance(ty) ? "进" : "退") + CN_NUM[file(tx) - 1];
+  } else {
+    // Straight move: count the steps.
+    const steps = Math.abs(dy);
+    tail = (isAdvance(ty) ? "进" : "退") + CN_NUM[steps - 1];
+  }
+  return head + tail;
+}

@@ -8,7 +8,7 @@ import {
   legalMovesFrom,
 } from "../game/engine";
 import type { Board, Difficulty, Move, Piece, Side } from "../game/types";
-import { chooseMove } from "../game/ai";
+import { chooseMove, rankMoves } from "../game/ai";
 import { sound } from "../audio/SoundEngine";
 import {
   animateFigure,
@@ -30,6 +30,7 @@ export interface SceneCallbacks {
   onThinkingChange: (thinking: boolean) => void;
   onSelectChange: (moves: Move[]) => void;
   onCheck: (side: Side | null) => void;
+  onSuggestions: (moves: Move[]) => void;
 }
 
 export class XiangqiScene {
@@ -71,6 +72,8 @@ export class XiangqiScene {
   private raf = 0;
   private clock = new THREE.Clock();
   private worker: Worker | null = null;
+  private workerSeq = 0;
+  private suggestionSeq = 0;
   private disposed = false;
   private keyLight!: THREE.DirectionalLight;
   private hemi!: THREE.HemisphereLight;
@@ -628,6 +631,10 @@ export class XiangqiScene {
     this.updateCheckMarker(foeInCheck ? m.to : null);
     this.cb.onCheck(foeInCheck ? this.turn : null);
 
+    // It's now the human's turn — surface engine suggestions.
+    if (this.mode === "ai" && this.turn === this.humanSide) this.requestSuggestions();
+    else this.cb.onSuggestions([]);
+
     this.checkGameState(foeInCheck);
   }
 
@@ -750,19 +757,70 @@ export class XiangqiScene {
         );
       }
       const w = this.worker;
+      const id = ++this.workerSeq;
       const handler = (e: MessageEvent) => {
+        if (e.data.id !== id) return;
         w.removeEventListener("message", handler);
         this.cb.onThinkingChange(false);
-        const move = e.data as Move | null;
+        const move = e.data.result as Move | null;
         if (move && !this.disposed) void this.playMove(move);
       };
       w.addEventListener("message", handler);
-      w.postMessage({ board: this.board, side: this.turn, difficulty: this.difficulty });
+      w.postMessage({ id, type: "choose", board: this.board, side: this.turn, difficulty: this.difficulty });
     } else {
       const move = chooseMove(this.board, this.turn, this.difficulty);
       this.cb.onThinkingChange(false);
       if (move) void this.playMove(move);
     }
+  }
+
+  /**
+   * Ask the engine to rank the current player's legal moves and surface the
+   * top suggestions via `onSuggestions`. Requests are invalidated as soon as
+   * the position changes, so stale results are dropped.
+   */
+  private requestSuggestions() {
+    if (this.mode !== "ai") return;
+    const seq = ++this.suggestionSeq;
+    if (typeof Worker !== "undefined") {
+      if (!this.worker) {
+        this.worker = new Worker(
+          new URL("../game/ai.worker.ts", import.meta.url),
+          { type: "module" }
+        );
+      }
+      const w = this.worker;
+      const id = ++this.workerSeq;
+      const handler = (e: MessageEvent) => {
+        if (e.data.id !== id) return;
+        w.removeEventListener("message", handler);
+        if (seq !== this.suggestionSeq || this.disposed) return;
+        this.cb.onSuggestions(e.data.result as Move[]);
+      };
+      w.addEventListener("message", handler);
+      w.postMessage({
+        id,
+        type: "suggest",
+        board: this.board,
+        side: this.turn,
+        difficulty: this.difficulty,
+        count: 3,
+      });
+    } else {
+      const moves = rankMoves(this.board, this.turn, this.difficulty, 3);
+      if (seq === this.suggestionSeq && !this.disposed) this.cb.onSuggestions(moves);
+    }
+  }
+
+  /** Play one of the suggested moves immediately (human turn). */
+  playSuggestedMove(move: Move) {
+    if (this.animating || this.mode !== "ai" || this.turn !== this.humanSide) return;
+    if (this.selected) {
+      this.clearHighlights();
+      this.selected = null;
+    }
+    this.cb.onSelectChange([]);
+    void this.playMove(move);
   }
 
   // --------------------------------------------------------------- public API
@@ -828,6 +886,7 @@ export class XiangqiScene {
     sound.play("start");
     sound.startAmbience(this.boardTheme.ambience);
     if (this.mode === "ai" && this.turn !== this.humanSide) this.runAI();
+    else if (this.mode === "ai") this.requestSuggestions();
   }
 
   // --------------------------------------------------------------- loop

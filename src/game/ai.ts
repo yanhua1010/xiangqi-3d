@@ -153,5 +153,32 @@ export function chooseMove(
   return best[Math.floor(Math.random() * best.length)];
 }
 
+/**
+ * Rank the legal moves of `side` by engine evaluation (shallow search),
+ * returning the top `count` moves best-first. Used to suggest candidate moves
+ * to the human player.
+ */
+export function rankMoves(
+  b: Board,
+  side: Side,
+  difficulty: Difficulty,
+  count = 3
+): Move[] {
+  const moves = legalMoves(b, side);
+  if (moves.length === 0) return [];
+  // Suggestions use a shallower depth so the UI stays snappy.
+  const depth = Math.max(1, DEPTH[difficulty] - 1);
+  const jitter = difficulty === "easy" ? 30 : 8;
+  const scored = moves.map((m) => {
+    const nb = applyMove(b, m);
+    const foe: Side = side === "r" ? "b" : "r";
+    const score = -negamax(nb, foe, depth - 1, -Infinity, Infinity) +
+      (Math.random() - 0.5) * jitter;
+    return { m, score };
+  });
+  scored.sort((a, z) => z.score - a.score);
+  return scored.slice(0, count).map((s) => s.m);
+}
+
 // Re-export for the worker's tree-shaking friendliness.
 export { isInCheck, kingsFacing };
