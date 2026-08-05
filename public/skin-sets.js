@@ -8,16 +8,21 @@
     { id: "jade", name: "翡翠 · 赤金", note: "玉翠 × 云台", piece: "jade", board: "jade", red: "#a84132", black: "#1d7164", boardA: "#39766a", boardB: "#153b38" },
     { id: "iron", name: "玄铁 · 战痕", note: "玄铁 × 青铜", piece: "iron", board: "bronze", red: "#73343d", black: "#263440", boardA: "#756342", boardB: "#383124" },
     { id: "lacquer", name: "金漆 · 宫廷", note: "金漆 × 朱阙", piece: "lacquer", board: "vermilion", red: "#8f2d26", black: "#182b2a", boardA: "#702b25", boardB: "#351615" },
+    { id: "celadon", name: "月白 · 青瓷", note: "青瓷 × 茶白", piece: "celadon", board: "celadon", red: "#b64c43", black: "#477b78", boardA: "#dbe9e1", boardB: "#a8c9c0" },
+    { id: "begonia", name: "海棠 · 春色", note: "海棠 × 暖粉", piece: "begonia", board: "begonia", red: "#c94e4b", black: "#5a4a58", boardA: "#e9c9bd", boardB: "#c98c87" },
+    { id: "yunjin", name: "云锦 · 金彩", note: "云锦 × 织金", piece: "yunjin", board: "yunjin", red: "#b3312f", black: "#344d5a", boardA: "#ead5a7", boardB: "#c9a060" },
+    { id: "bamboo", name: "竹影 · 清韵", note: "竹青 × 霁色", piece: "bamboo", board: "bamboo", red: "#b85a42", black: "#3e6659", boardA: "#cdddbb", boardB: "#91ad89" },
+    { id: "cloisonne", name: "景泰蓝 · 瑞彩", note: "珐琅 × 金线", piece: "cloisonne", board: "cloisonne", red: "#bf3f32", black: "#185c76", boardA: "#b9e0d8", boardB: "#619fa3" },
   ];
 
-  const state = { section: null, initialized: false, active: "cinnabar" };
+  const state = { section: null, initialized: false, active: "celadon" };
 
   function inferActive() {
     const stored = localStorage.getItem("xiangqi-skin-set");
     if (stored && SETS.some((item) => item.id === stored)) return stored;
     const piece = localStorage.getItem("xiangqi-piece-skin");
     const board = localStorage.getItem("xiangqi-board-skin");
-    return SETS.find((item) => item.piece === piece && item.board === board)?.id || SETS[0].id;
+    return SETS.find((item) => item.piece === piece && item.board === board)?.id || "celadon";
   }
 
   function updateActive() {
@@ -84,7 +89,7 @@
     updateActive();
     if (!state.initialized) {
       state.initialized = true;
-      const initial = SETS.find((item) => item.id === state.active) || SETS[0];
+      const initial = SETS.find((item) => item.id === state.active) || SETS.find((item) => item.id === "celadon") || SETS[0];
       applySet(initial);
     }
     return true;

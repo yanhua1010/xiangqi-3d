@@ -38,10 +38,45 @@
       black: { glaze: "#182b2a", deep: "#0d1918", trim: "#d9b969", dark: "#111514", wood: "#2b2118", saddle: "#142321", skin: "#ae7c5d" },
       bronze: "#9a7a3d", ivory: "#ead9b8", cream: "#f2dfb0", jade: "#c5ab62",
     },
+    {
+      id: "celadon",
+      name: "月白 · 青瓷",
+      red: { glaze: "#b64c43", deep: "#81342f", trim: "#d9b36b", dark: "#5b3a2f", wood: "#6b4a35", saddle: "#874039", skin: "#c78f6c" },
+      black: { glaze: "#477b78", deep: "#2f5c5a", trim: "#c9d6cc", dark: "#2a4646", wood: "#5a4938", saddle: "#396865", skin: "#c78f6c" },
+      bronze: "#849c91", ivory: "#eef0e2", cream: "#f7f5e9", jade: "#9ed4c0",
+    },
+    {
+      id: "begonia",
+      name: "海棠 · 春色",
+      red: { glaze: "#c94e4b", deep: "#9f3237", trim: "#e6bf78", dark: "#5c2730", wood: "#704032", saddle: "#9f3540", skin: "#d49a78" },
+      black: { glaze: "#5a4a58", deep: "#3b3240", trim: "#d3b789", dark: "#302936", wood: "#5b4037", saddle: "#4a3b50", skin: "#d49a78" },
+      bronze: "#9d7b68", ivory: "#f5e6d6", cream: "#fff4e9", jade: "#d99aab",
+    },
+    {
+      id: "yunjin",
+      name: "云锦 · 金彩",
+      red: { glaze: "#b3312f", deep: "#812127", trim: "#f0c96a", dark: "#493225", wood: "#74482d", saddle: "#8f262b", skin: "#c98f68" },
+      black: { glaze: "#344d5a", deep: "#243845", trim: "#f0c96a", dark: "#202e39", wood: "#5b432c", saddle: "#2f4655", skin: "#c98f68" },
+      bronze: "#a98148", ivory: "#f0dfb7", cream: "#fff3ce", jade: "#d2b75c",
+    },
+    {
+      id: "bamboo",
+      name: "竹影 · 清韵",
+      red: { glaze: "#b85a42", deep: "#8e3c30", trim: "#d9bd75", dark: "#2e3d30", wood: "#5a4730", saddle: "#8b4334", skin: "#c9936a" },
+      black: { glaze: "#3e6659", deep: "#2b4c42", trim: "#c7d09e", dark: "#25382f", wood: "#4b4d35", saddle: "#34564b", skin: "#c9936a" },
+      bronze: "#718866", ivory: "#edf0d9", cream: "#f8f4da", jade: "#a9cf9c",
+    },
+    {
+      id: "cloisonne",
+      name: "景泰蓝 · 瑞彩",
+      red: { glaze: "#bf3f32", deep: "#86241f", trim: "#f0c76e", dark: "#3c2930", wood: "#534239", saddle: "#8d2c25", skin: "#c98d69" },
+      black: { glaze: "#185c76", deep: "#103e56", trim: "#e5c46d", dark: "#112c39", wood: "#324c52", saddle: "#164b63", skin: "#c98d69" },
+      bronze: "#6f9b92", ivory: "#e9f4eb", cream: "#f3f7e8", jade: "#7bd6c0",
+    },
   ];
 
   const state = {
-    active: localStorage.getItem("xiangqi-piece-skin") || SKINS[0].id,
+    active: localStorage.getItem("xiangqi-piece-skin") || "celadon",
     panel: null,
     options: null,
     lastPieces: "",
